@@ -1,10 +1,70 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="vi">
 <head>
-    <title>Flask Telegram Bot</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Web Chat → Telegram</title>
+  <style>
+    body{font-family:system-ui,Arial,sans-serif;max-width:720px;margin:24px auto;padding:0 12px}
+    #box{border:1px solid #ddd;border-radius:10px;padding:12px;min-height:160px}
+    .msg{margin:6px 0;padding:8px 12px;border-radius:10px;display:inline-block;max-width:90%}
+    .me{background:#dbeafe}.bot{background:#e5e7eb}
+    .row{display:flex;gap:8px;margin-top:12px}
+    input{flex:1;padding:12px;border:1px solid #ddd;border-radius:10px}
+    button{padding:12px 16px;border-radius:10px;border:0;background:#0ea5e9;color:white}
+    #status{margin-top:8px;color:#6b7280;font-size:14px}
+  </style>
 </head>
 <body>
-    <h1>Bot Flask + Telegram</h1>
-    <p>Nếu bạn thấy trang này nghĩa là server Flask đã chạy thành công 🚀</p>
+  <h1>Web Chat → Telegram (auto-reply)</h1>
+  <p>Nhập câu hỏi, bot sẽ gửi sang Telegram và hiện câu trả lời ở dưới.</p>
+  <div id="box"></div>
+  <div class="row">
+    <input id="msg" placeholder="Nhập tin nhắn…" />
+    <button id="send">Gửi</button>
+  </div>
+  <div id="status"></div>
+
+<script>
+const box = document.getElementById('box');
+const input = document.getElementById('msg');
+const btn = document.getElementById('send');
+const statusEl = document.getElementById('status');
+
+function add(side, text){
+  const d = document.createElement('div');
+  d.className = 'msg ' + (side==='me'?'me':'bot');
+  d.textContent = text;
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function send(){
+  const text = (input.value || '').trim();
+  if(!text) return;
+  add('me', text);
+  input.value = '';
+  statusEl.textContent = 'Đang gửi…';
+  try{
+    const res = await fetch('/webchat', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({text})
+    });
+    const data = await res.json();
+    statusEl.textContent = '';
+    if(data.reply){
+      add('bot', data.reply);
+    }else{
+      add('bot', 'Đã chuyển câu hỏi, mình sẽ trả lời sau.');
+    }
+  }catch(e){
+    statusEl.textContent = 'Lỗi gọi server: ' + e.message;
+  }
+}
+
+btn.onclick = send;
+input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
+</script>
 </body>
 </html>
