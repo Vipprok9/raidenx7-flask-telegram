@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RaidenX7 · AI Smart Home</title>
+  <style>
+    :root{
+      --bg:#ffffff; --fg:#0f172a; --muted:#475569; --primary:#06b6d4;
+      --header-h:56px;
+      --overlay-light:linear-gradient(to bottom, rgba(0,0,0,.28) 0%, transparent 40%, rgba(0,0,0,.28) 100%);
+      --overlay-dark:linear-gradient(to bottom, rgba(0,0,0,.58) 0%, transparent 40%, rgba(0,0,0,.68) 100%);
+      --surface:#ffffff; --surface-weak:#f8fafc; --border:#e2e8f0;
+    }
+    [data-theme="dark"]{
+      --bg:#0b1220; --fg:#e5e7eb; --muted:#a3b0c2; --primary:#22d3ee;
+      --surface:#0f172a; --surface-weak:#0b1220; --border:#1f2937;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{ margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial; background:var(--bg); color:var(--fg); }
+    /* Header */
+    .nav{
+      position:sticky; top:0; z-index:1000;
+      backdrop-filter:saturate(140%) blur(8px);
+      background-color:color-mix(in oklab, var(--surface) 82%, transparent);
+      border-bottom:1px solid var(--border);
+      padding:10px 16px; display:flex; align-items:center; justify-content:space-between;
+      height:var(--header-h);
+      pointer-events:auto;
+    }
+    .brand{ font-weight:800; letter-spacing:.2px }
+    .toggle{
+      position:relative; z-index:1001;
+      display:inline-flex; align-items:center; justify-content:center;
+      width:42px; height:42px; border-radius:999px; border:1px solid var(--border);
+      background:transparent; color:var(--fg); cursor:pointer; pointer-events:auto;
+    }
+    .toggle:active{ transform:scale(.98) }
+
+    /* Hero */
+    .hero{
+      position:relative; min-height:62vh; display:grid; place-items:end;
+      background: url("assets/girl.png") center/cover no-repeat;
+      border-bottom-left-radius:18px; border-bottom-right-radius:18px; overflow:hidden;
+      transition:filter .2s ease;
+    }
+    /* Overlay for readability that changes with theme */
+    .hero::before{
+      content:""; position:absolute; inset:0; pointer-events:none;
+      background: var(--overlay-light);
+      transition: background .2s ease;
+    }
+    [data-theme="dark"] .hero{ filter: brightness(.88); }
+    [data-theme="dark"] .hero::before{ background: var(--overlay-dark); }
+    .hero-inner{ position:relative; z-index:1; width:100%; padding:24px 16px 28px; }
+    .title{ font-weight:900; font-size:clamp(26px,6vw,44px); margin:0 0 8px; color:#f1f5f9; text-shadow:0 2px 8px rgba(0,0,0,.35); }
+    .sub{ color:#e2e8f0; opacity:.9; margin-bottom:14px }
+    .pill{
+      display:inline-flex; gap:8px; align-items:center; padding:10px 14px; border-radius:999px;
+      background:rgba(255,255,255,.12); color:#f1f5f9; border:1px solid rgba(255,255,255,.22);
+      user-select:none; cursor:pointer;
+    }
+    .cta{ display:inline-block; margin-left:12px; padding:12px 18px; border-radius:12px; background:var(--primary); color:#003; font-weight:800; border:none; cursor:pointer; }
+
+    .container{ max-width:960px; margin:24px auto; padding:0 16px; }
+
+    /* Chat */
+    .chat{ background:var(--surface); border:1px dashed var(--border); border-radius:12px; padding:12px; }
+    .row{ display:flex; gap:8px; }
+    .row input{ flex:1; padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--surface-weak); color:var(--fg); outline:none; }
+    .row button{ padding:12px 16px; border-radius:10px; border:1px solid var(--border); background:var(--primary); color:#003; font-weight:800; cursor:pointer }
+
+    /* Modal */
+    .backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.45); opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:1500; }
+    .backdrop.open{ opacity:1; pointer-events:auto; }
+    .modal{
+      position:fixed; left:50%; transform:translateX(-50%); top:calc(var(--header-h) + env(safe-area-inset-top, 0px) + 12px);
+      width:min(920px,92vw); max-height:80vh; background:var(--surface); color:var(--fg); border-radius:24px; border:1px solid var(--border);
+      overflow:hidden; display:none; z-index:1600; box-shadow:0 20px 60px rgba(0,0,0,.35);
+    }
+    .modal.open{ display:block; }
+    .modal-hd{ display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border); }
+    .modal-tt{ font-weight:800; font-size:22px }
+    .close{ background:transparent; border:none; color:inherit; font-size:26px; cursor:pointer }
+    .grid{ padding:18px; display:grid; grid-template-columns:repeat(2,1fr); gap:16px; }
+    .card{ border:1px solid var(--border); border-radius:18px; overflow:hidden; background:var(--surface-weak) }
+    /* Show full image (no crop) and make them larger */
+    .card img{ width:100%; height:auto; aspect-ratio: 4/3; object-fit:contain; display:block; }
+    @media (min-width:768px){ .grid{ grid-template-columns:repeat(2,1fr) } .card img{ aspect-ratio: 16/10 } }
+
+    .no-scroll{ overflow:hidden; height:100vh }
+  </style>
+</head>
+<body>
+  <header class="nav" id="siteHeader">
+    <div class="brand">RaidenX7</div>
+    <button id="topToggle" class="toggle" aria-label="Bật/Tắt chế độ sáng tối" title="Đổi nền">☀️</button>
+  </header>
+
+  <section class="hero" aria-label="Ảnh nền">
+    <div class="hero-inner">
+      <h1 class="title">Nhà Thông Minh Kỷ Nguyên AI</h1>
+      <div class="sub">Nhanh · Gọn · Hiện đại</div>
+      <button id="pillToggle" class="pill" type="button" aria-pressed="false"><span id="pillState">Đèn: OFF</span></button>
+      <button id="openGallery" class="cta" type="button">Xem Gallery</button>
+    </div>
+  </section>
+
+  <main class="container">
+    <div class="chat">
+      <strong>AI Chat</strong>
+      <div class="row" style="margin-top:8px">
+        <input id="chatInput" placeholder="Nhập tin nhắn..." />
+        <button id="chatSend">Gửi</button>
+      </div>
+    </div>
+  </main>
+
+  <div id="backdrop" class="backdrop" aria-hidden="true"></div>
+  <div id="galleryModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="gTitle">
+    <div class="modal-hd">
+      <div id="gTitle" class="modal-tt">Gallery</div>
+      <button id="closeGallery" class="close" aria-label="Đóng">✕</button>
+    </div>
+    <div class="grid">
+      <figure class="card"><img src="assets/girl.png" alt="Girl" /></figure>
+      <figure class="card"><img src="assets/hamster.png" alt="Hamster" /></figure>
+      <figure class="card"><img src="assets/man.png" alt="Man" /></figure>
+      <figure class="card"><img src="assets/room.png" alt="Room" /></figure>
+    </div>
+  </div>
+
+  <script>
+    // Ensure header height CSS var
+    (function setHeaderHeight(){
+      const h = document.getElementById('siteHeader');
+      const hh = h ? h.offsetHeight : 56;
+      document.documentElement.style.setProperty('--header-h', hh + 'px');
+      window.addEventListener('resize', ()=>{
+        const nh = (document.getElementById('siteHeader')||{offsetHeight:56}).offsetHeight;
+        document.documentElement.style.setProperty('--header-h', nh + 'px');
+      });
+    })();
+
+    // Robust THEME toggle: top + pill → whole page + hero overlay/brightness
+    (function(){
+      const root = document.documentElement;
+      const topBtn = document.getElementById('topToggle');
+      const pillBtn = document.getElementById('pillToggle');
+      const pillState = document.getElementById('pillState');
+
+      function apply(theme){
+        root.setAttribute('data-theme', theme);
+        localStorage.setItem('rx7-theme', theme);
+        const isDark = theme === 'dark';
+        if(topBtn) topBtn.textContent = isDark ? '🌙' : '☀️';
+        if(pillState) pillState.textContent = isDark ? 'Đèn: ON' : 'Đèn: OFF';
+        if(pillBtn) pillBtn.setAttribute('aria-pressed', String(isDark));
+      }
+      const saved = localStorage.getItem('rx7-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      apply(saved);
+
+      function toggle(){ apply(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); }
+      // Fallback: also listen on document to avoid overlay capturing
+      document.addEventListener('click', (e)=>{
+        if(e.target && (e.target.id === 'topToggle')) toggle();
+      });
+      if(topBtn) topBtn.addEventListener('click', (e)=>{ e.stopPropagation(); toggle(); });
+      if(pillBtn) pillBtn.addEventListener('click', toggle);
+    })();
+
+    // Modal open/close
+    (function(){
+      const modal = document.getElementById('galleryModal');
+      const openBtn = document.getElementById('openGallery');
+      const closeBtn = document.getElementById('closeGallery');
+      const backdrop = document.getElementById('backdrop');
+      function openModal(){ modal.classList.add('open'); backdrop.classList.add('open'); document.body.classList.add('no-scroll'); }
+      function closeModal(){ modal.classList.remove('open'); backdrop.classList.remove('open'); document.body.classList.remove('no-scroll'); }
+      openBtn.addEventListener('click', openModal);
+      closeBtn.addEventListener('click', closeModal);
+      backdrop.addEventListener('click', closeModal);
+      window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeModal(); });
+    })();
+
+    // Chat demo
+    document.getElementById('chatSend').addEventListener('click', ()=>{
+      const v = document.getElementById('chatInput').value.trim();
+      if(v) console.log('User:', v);
+      document.getElementById('chatInput').value = '';
+    });
+  </script>
+</body>
+</html>
