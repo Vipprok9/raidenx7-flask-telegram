@@ -1,18 +1,26 @@
 # server.py
 import os, requests
+from time import time
+from collections import deque
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
-# ==== Flask & CORS (phục vụ index.html ở thư mục gốc) ====
+# ==== Flask & CORS ====
 app = Flask(__name__, static_url_path="", static_folder=".")
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ==== ENV trên Render ====
+# ==== ENV ====
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
-CHAT_ID   = os.environ.get("CHAT_ID", "").strip()   # có thể bỏ trống, sẽ lấy chat_id động từ Telegram
+CHAT_ID   = os.environ.get("CHAT_ID", "").strip()  # optional cho chiều Web→TG
 TG_API    = "https://api.telegram.org/bot" + BOT_TOKEN
 
-# ==== auto-reply ngắn (fallback) ====
+# ==== Bộ nhớ tạm để demo (prod nên dùng Redis/DB) ====
+MESSAGES = deque(maxlen=200)  # lưu 200 tin gần nhất
+
+def push_msg(source, text):
+    MESSAGES.append({"ts": time(), "source": source, "text": text or ""})
+
+# ==== Auto-reply ngắn ====
 AUTO_REPLY = {
     "hello": "Xin chào 👋, mình là bot raidenx7!",
     "ai": "AI là trí tuệ nhân tạo giúp tự động hóa và phân tích.",
@@ -22,7 +30,6 @@ AUTO_REPLY = {
     "node": "Node là máy/chương trình tham gia mạng blockchain.",
     "depin": "DePIN là mạng lưới hạ tầng vật lý phi tập trung."
 }
-
 def match_auto(text: str) -> str:
     t = (text or "").lower().strip()
     for k, v in AUTO_REPLY.items():
@@ -30,13 +37,12 @@ def match_auto(text: str) -> str:
             return v
     return "Mình đã chuyển câu hỏi cho hệ thống, cảm ơn bạn!"
 
-# ==== Trang test (/ mở index.html) ====
+# ==== Trang test ====
 @app.get("/")
 def home():
     return send_file("index.html")
 
-# ==== API: Web → Telegram ====
-# Gửi JSON: {"text": "..."}  (tuỳ chọn: {"chat_id": 123456789})
+# ==== Web → Telegram ====
 @app.post("/api/send")
 def api_send():
     try:
@@ -51,6 +57,9 @@ def api_send():
         if not chat_id:
             return jsonify({"ok": False, "error": "missing chat_id (pass in body or set CHAT_ID env)"}), 400
 
+        # lưu tin của web để UI hiển thị ngay
+        push_msg("web", text)
+
         r = requests.post(
             f"{TG_API}/sendMessage",
             json={"chat_id": chat_id, "text": text},
@@ -61,37 +70,48 @@ def api_send():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# ==== API: Telegram → Web (Webhook) ====
+# ==== Telegram → Web (Webhook) ====
 @app.post("/webhook")
 def telegram_webhook():
     try:
         data = request.get_json(silent=True) or {}
-        # Telegram có thể gửi message, edited_message, channel_post...
         msg = data.get("message") or data.get("edited_message") or data.get("channel_post") or {}
         chat_id = (msg.get("chat") or {}).get("id")
         text = msg.get("text") or ""
 
-        # Ghi log để theo dõi
         print("INCOMING:", {"chat_id": chat_id, "text": text}, flush=True)
 
-        # Trả lời đơn giản bằng auto-reply (có thể thay bằng logic của bạn)
-        reply = match_auto(text)
+        # lưu tin của Telegram để web kéo về
+        if text:
+            push_msg("telegram", text)
 
+        reply = match_auto(text)
         if BOT_TOKEN and chat_id and reply:
             requests.post(
                 f"{TG_API}/sendMessage",
                 json={"chat_id": chat_id, "text": reply},
                 timeout=10
             )
-
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 200  # vẫn trả 200 để Telegram không retry quá nhiều
+        return jsonify({"ok": False, "error": str(e)}), 200
+
+# ==== API cho front-end kéo tin ====
+@app.get("/api/messages")
+def api_messages():
+    try:
+        since = request.args.get("since", type=float)  # epoch seconds
+        items = list(MESSAGES)
+        if since:
+            items = [m for m in items if m["ts"] > since]
+        return jsonify({"ok": True, "items": items, "now": time()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # ==== Healthcheck ====
 @app.get("/health")
 def health():
     return {"ok": True}
 
-# ==== cho Render (gunicorn sẽ dùng 'server:app') ====
+# ==== cho gunicorn ====
 app = app
