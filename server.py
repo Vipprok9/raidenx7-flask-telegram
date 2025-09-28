@@ -2,16 +2,18 @@
 import os, requests
 from time import time
 from collections import deque
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_from_directory, current_app
 from flask_cors import CORS
 
 # ==== Flask & CORS ====
+# static_folder="." để phục vụ index.html ở thư mục gốc repo
 app = Flask(__name__, static_url_path="", static_folder=".")
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # ==== ENV ====
+# Trên Render: đặt BOT_TOKEN (bắt buộc), CHAT_ID (tùy chọn cho chiều Web→TG)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
-CHAT_ID   = os.environ.get("CHAT_ID", "").strip()  # optional cho chiều Web→TG
+CHAT_ID   = os.environ.get("CHAT_ID", "").strip()   # optional
 TG_API    = "https://api.telegram.org/bot" + BOT_TOKEN
 
 # ==== Bộ nhớ tạm để demo (prod nên dùng Redis/DB) ====
@@ -37,12 +39,18 @@ def match_auto(text: str) -> str:
             return v
     return "Mình đã chuyển câu hỏi cho hệ thống, cảm ơn bạn!"
 
-# ==== Trang test ====
+# ==== Trang test (/) an toàn, không 500 khi thiếu file ====
 @app.get("/")
 def home():
-    return send_file("index.html")
+    static_dir = current_app.static_folder or "."
+    index_path = os.path.join(static_dir, "index.html")
+    if not os.path.isfile(index_path):
+        # fallback để tránh 500 và dễ debug
+        return "<h3>App đang chạy ✅ — thiếu index.html</h3>", 200
+    return send_from_directory(static_dir, "index.html")
 
 # ==== Web → Telegram ====
+# POST /api/send  body: {"text":"..."}  (tùy chọn {"chat_id": ...})
 @app.post("/api/send")
 def api_send():
     try:
@@ -57,7 +65,7 @@ def api_send():
         if not chat_id:
             return jsonify({"ok": False, "error": "missing chat_id (pass in body or set CHAT_ID env)"}), 400
 
-        # lưu tin của web để UI hiển thị ngay
+        # Lưu tin gửi từ web để front-end hiển thị ngay
         push_msg("web", text)
 
         r = requests.post(
@@ -68,6 +76,7 @@ def api_send():
         ok = r.ok and r.json().get("ok", False)
         return jsonify({"ok": bool(ok), "tg": r.json() if r.ok else r.text})
     except Exception as e:
+        print("ERROR /api/send:", repr(e), flush=True)
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ==== Telegram → Web (Webhook) ====
@@ -81,10 +90,11 @@ def telegram_webhook():
 
         print("INCOMING:", {"chat_id": chat_id, "text": text}, flush=True)
 
-        # lưu tin của Telegram để web kéo về
+        # Lưu tin Telegram để web kéo về
         if text:
             push_msg("telegram", text)
 
+        # Auto-reply đơn giản
         reply = match_auto(text)
         if BOT_TOKEN and chat_id and reply:
             requests.post(
@@ -94,9 +104,11 @@ def telegram_webhook():
             )
         return jsonify({"ok": True})
     except Exception as e:
+        print("ERROR /webhook:", repr(e), flush=True)
+        # vẫn trả 200 để Telegram không retry dồn dập
         return jsonify({"ok": False, "error": str(e)}), 200
 
-# ==== API cho front-end kéo tin ====
+# ==== API cho front-end kéo tin về ====
 @app.get("/api/messages")
 def api_messages():
     try:
@@ -106,12 +118,19 @@ def api_messages():
             items = [m for m in items if m["ts"] > since]
         return jsonify({"ok": True, "items": items, "now": time()})
     except Exception as e:
+        print("ERROR /api/messages:", repr(e), flush=True)
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ==== Healthcheck ====
 @app.get("/health")
 def health():
     return {"ok": True}
+
+# ==== Error handler chung (log rõ lỗi 500) ====
+@app.errorhandler(Exception)
+def on_error(e):
+    print("ERROR general:", repr(e), flush=True)
+    return jsonify({"ok": False, "error": str(e)}), 500
 
 # ==== cho gunicorn ====
 app = app
