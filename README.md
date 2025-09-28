@@ -3,9 +3,11 @@
 API bridge Web → Telegram.
 
 ## ENV (Render → Environment)
-- `TELEGRAM_TOKEN`: Bot token từ @BotFather
-- `TARGET_CHAT_ID`: chat id nhận tin
+- `BOT_TOKEN` : Bot token từ @BotFather
+- `CHAT_ID`   : chat id nhận tin (cá nhân hoặc group)
 
-## Deploy
-- Build command: `pip install -r requirements.txt`
-- Start command: `gunicorn server:app`
+## Deploy (Render)
+- **Build Command**: `pip install -r requirements.txt`
+- **Start Command**: `gunicorn server:app`
+
+Mở `/` để test UI; gọi API: `POST /api/send` `{ "text": "Xin chào" }`.
