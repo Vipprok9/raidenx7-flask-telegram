@@ -2,138 +2,94 @@
 import os, requests
 from time import time
 from collections import deque
-from flask import Flask, request, jsonify, send_from_directory, current_app
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
 # ==== Flask & CORS ====
-# static_folder="." -> phục vụ index.html ở thư mục gốc repo (cùng server.py)
-app = Flask(__name__, static_url_path="", static_folder=".")
+app = Flask(__name__, static_url_path="")
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ==== ENV ====
-# Trên Render cần đặt BOT_TOKEN (bắt buộc), CHAT_ID (tùy chọn cho chiều Web→TG)
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
-CHAT_ID   = os.environ.get("CHAT_ID", "").strip()   # optional
-TG_API    = f"https://api.telegram.org/bot{BOT_TOKEN}"  # <- ĐÚNG CÚ PHÁP
+# ==== ENV (đọc linh hoạt) ====
+# Hỗ trợ cả 2 kiểu đặt biến ENV để tránh nhầm tên
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or os.environ.get("TELEGRAM_TOKEN") or ""
+CHAT_ID   = os.environ.get("CHAT_ID")   or os.environ.get("TARGET_CHAT_ID") or ""
+TG_API    = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 
-# ==== Bộ nhớ tạm để demo (prod nên dùng Redis/DB) ====
+# ==== Bộ nhớ tạm hiển thị lên Web (demo) ====
 MESSAGES = deque(maxlen=200)  # lưu ~200 tin gần nhất
 
-def push_msg(source, text):
-    MESSAGES.append({"ts": time(), "source": source, "text": text or ""})
+def push_msg(source: str, text: str):
+    MESSAGES.append({"ts": time(), "source": source, "text": text})
 
-# ==== Auto-reply ngắn ====
-AUTO_REPLY = {
-    "hello":  "Xin chào 👋, mình là bot raidenx7!",
-    "ai":     "AI là trí tuệ nhân tạo giúp tự động hóa và phân tích.",
-    "token":  "Token là đơn vị giá trị trên blockchain.",
-    "defi":   "DeFi là tài chính phi tập trung (decentralized finance).",
-    "airdrop":"Airdrop: dự án tặng token cho người dùng.",
-    "node":   "Node là máy/chương trình tham gia mạng blockchain.",
-    "depin":  "DePIN là mạng lưới hạ tầng vật lý phi tập trung."
-}
-def match_auto(text: str) -> str:
-    t = (text or "").lower().strip()
-    for k, v in AUTO_REPLY.items():
-        if k in t:
-            return v
-    return "Mình đã chuyển câu hỏi cho hệ thống, cảm ơn bạn!"
-
-# ==== Trang gốc (/) an toàn, không 500 khi thiếu index ====
+# (tuỳ chọn) Trang gốc – không cần index.html trên Render
 @app.get("/")
-def home():
-    static_dir = current_app.static_folder or "."
-    index_path = os.path.join(static_dir, "index.html")
-    if not os.path.isfile(index_path):
-        return "<h3>App đang chạy ✅ — thiếu index.html</h3>", 200
-    return send_from_directory(static_dir, "index.html")
+def root():
+    return "App đang chạy ✅ — thiếu index.html", 200
 
-# ==== Web → Telegram ====
-# POST /api/send   body: {"text":"..."}  (tùy chọn {"chat_id": ...})
-@app.post("/api/send")
-def api_send():
-    try:
+# Healthcheck
+@app.get("/health")
+def health():
+    return jsonify({"ok": True})
+
+# ==== API: Web <-> Telegram ====
+# GET: web đọc tin | POST: web gửi tin sang Telegram
+@app.route("/api/messages", methods=["GET", "POST"])
+def api_messages():
+    if request.method == "POST":
         data = request.get_json(silent=True) or {}
         text = (data.get("text") or "").strip()
-        chat_id = str(data.get("chat_id") or CHAT_ID).strip()
-
         if not text:
             return jsonify({"ok": False, "error": "missing text"}), 400
-        if not BOT_TOKEN:
-            return jsonify({"ok": False, "error": "missing BOT_TOKEN env"}), 500
-        if not chat_id:
-            return jsonify({"ok": False, "error": "missing chat_id (pass in body or set CHAT_ID env)"}), 400
 
-        # Lưu tin web để UI hiển thị
+        # Lưu tin người dùng web
         push_msg("web", text)
 
-        r = requests.post(
-            f"{TG_API}/sendMessage",
-            json={"chat_id": chat_id, "text": text},
-            timeout=10
-        )
-        ok = r.ok and (r.json().get("ok", False) if r.headers.get("content-type","").startswith("application/json") else False)
-        return jsonify({"ok": bool(ok), "tg": r.json() if r.headers.get("content-type","").startswith("application/json") else r.text})
-    except Exception as e:
-        print("ERROR /api/send:", repr(e), flush=True)
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-# ==== Telegram → Web (Webhook) ====
-@app.post("/webhook")
-def telegram_webhook():
-    try:
-        data = request.get_json(silent=True) or {}
-        msg = data.get("message") or data.get("edited_message") or data.get("channel_post") or {}
-        chat_id = (msg.get("chat") or {}).get("id")
-        text = msg.get("text") or ""
-
-        print("INCOMING:", {"chat_id": chat_id, "text": text}, flush=True)
-
-        # Lưu tin Telegram để web kéo về
-        if text:
-            push_msg("telegram", text)
-
-        # Auto-reply ngắn
-        reply = match_auto(text)
-        if BOT_TOKEN and chat_id and reply:
+        # Gửi qua Telegram (nếu có token)
+        if TG_API:
+            chat_id = (data.get("chat_id") or CHAT_ID or "").strip()
             try:
                 requests.post(
                     f"{TG_API}/sendMessage",
-                    json={"chat_id": chat_id, "text": reply},
-                    timeout=10
+                    json={"chat_id": chat_id, "text": f"[Web] {text}"},
+                    timeout=10,
                 )
-            except Exception as ex:
-                print("ERROR send reply:", repr(ex), flush=True)
+            except Exception:
+                pass
 
         return jsonify({"ok": True})
-    except Exception as e:
-        print("ERROR /webhook:", repr(e), flush=True)
-        # trả 200 để Telegram không retry dồn dập
-        return jsonify({"ok": False, "error": str(e)}), 200
 
-# ==== API cho front-end kéo tin ====
-@app.get("/api/messages")
-def api_messages():
+    # GET: trả về danh sách tin nhắn (no-store để tránh cache)
+    data = {"items": list(MESSAGES), "now": time()}
+    return jsonify(data), 200, {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+    }
+
+# ==== Webhook Telegram ====
+@app.post("/webhook")
+def tg_webhook():
+    u = request.get_json(silent=True) or {}
+    msg = (u.get("message") or u.get("edited_message")) or {}
+    text = (msg.get("text") or "").strip()
+    if not text:
+        return jsonify({"ok": True})
+
+    # Lưu tin người dùng từ Telegram để web nhìn thấy
+    push_msg("telegram", text)
+
+    # (tuỳ chọn) gửi ACK và cũng lưu để web nhìn thấy luôn
+    ack = "Mình đã chuyển câu hỏi cho hệ thống, cảm ơn bạn!"
     try:
-        since = request.args.get("since", type=float)  # epoch seconds
-        items = list(MESSAGES)
-        if since:
-            items = [m for m in items if m["ts"] > since]
-        return jsonify({"ok": True, "items": items, "now": time()})
-    except Exception as e:
-        print("ERROR /api/messages:", repr(e), flush=True)
-        return jsonify({"ok": False, "error": str(e)}), 500
+        if TG_API:
+            requests.post(
+                f"{TG_API}/sendMessage",
+                json={"chat_id": CHAT_ID or msg.get("chat", {}).get("id"), "text": ack},
+                timeout=10,
+            )
+        push_msg("telegram", ack)
+    except Exception:
+        pass
 
-# ==== Health ====
-@app.get("/health")
-def health():
-    return {"ok": True}
+    return jsonify({"ok": True})
 
-# ==== Error handler chung ====
-@app.errorhandler(Exception)
-def on_error(e):
-    print("ERROR general:", repr(e), flush=True)
-    return jsonify({"ok": False, "error": str(e)}), 500
-
-# ==== cho gunicorn ====
+# Cho Render (gunicorn dùng biến app)
 app = app
