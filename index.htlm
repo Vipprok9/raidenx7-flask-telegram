@@ -1,114 +1,139 @@
 <!doctype html>
 <html lang="vi">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Web Chat → Telegram (auto-reply)</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>RaidenX7 · Web ↔ Telegram</title>
   <style>
-    :root{--bg:#0b1220;--fg:#e8eefc;--panel:#121a2b;--muted:#96a0b8;--me:#1e3a8a;--bot:#0b3d2e;--ok:#1a8f3f;}
-    .light{--bg:#f7f9fc;--fg:#0c1222;--panel:#ffffff;--muted:#4b5568;--me:#2563eb;--bot:#0f766e;}
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,Segoe UI,Arial}
-    .wrap{max-width:960px;margin:auto;padding:20px}
+    :root{--bg:#0b1220;--fg:#e8eefc;--card:#111a2b;--muted:#93a1c5;--me:#3962c4;--bot:#2a2f6b}
+    .light{--bg:#f7f9fc;--fg:#0c1222;--card:#ffffff;--muted:#6f7a94;--me:#3b82f6;--bot:#1f3a8a}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,Segoe UI,Roboto}
+    .wrap{max-width:960px;margin:auto;padding:18px}
+    h1{margin:6px 0 12px}
     .row{display:flex;gap:10px;align-items:center;justify-content:space-between}
-    .card{background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:18px}
-    h1{margin:8px 0 4px} .muted{color:var(--muted)}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    #box{height:360px;overflow:auto;border-radius:14px;border:1px solid rgba(255,255,255,.08);padding:10px;background:var(--panel)}
-    .msg{padding:10px 14px;border-radius:12px;margin:6px 0;max-width:80%}
+    .badge{display:inline-flex;gap:6px;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.08)}
+    .card{background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+    .grid{display:grid;grid-template-columns:1fr;gap:16px}
+    #box{height:380px;overflow:auto;border-radius:12px;background:rgba(255,255,255,.04);padding:10px}
+    .msg{padding:10px 14px;border-radius:12px;margin:8px 0;max-width:85%;word-wrap:break-word}
     .me{background:var(--me);color:#fff;margin-left:auto}
-    .bot{background:var(--bot);color:#dcfce7;margin-right:auto}
+    .bot{background:var(--bot);color:#fff;margin-right:auto}
     .controls{display:flex;gap:10px;margin-top:10px}
-    input,select,button{padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:var(--panel);color:var(--fg);width:100%}
-    button{cursor:pointer} .send{background:var(--ok);color:#fff;border:none;width:auto;padding:12px 18px}
-    .badge{display:inline-flex;gap:6px;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.08);font-size:14px}
-    .gallery{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-    .gallery img{width:100%;height:80px;object-fit:cover;border-radius:12px;border:1px solid rgba(255,255,255,.1)}
-    .tip{font-size:14px;margin-top:8px}
+    input,select,button{padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:var(--fg);outline:none}
+    input{flex:1}
+    button{cursor:pointer}
+    .gallery{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    .gallery img{width:100%;height:90px;object-fit:cover;border-radius:12px}
+    .muted{color:var(--muted);font-size:14px}
+    a{color:#8ab4ff;text-decoration:none}
   </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="row">
-    <div class="badge">⚡ Realtime • Web → Telegram</div>
-    <button id="theme" class="badge">🌙/🌞 Đổi nền</button>
-  </div>
+  <div class="wrap">
 
-  <div class="card">
-    <h1>Web Chat → <b>Telegram</b> (auto-reply)</h1>
-    <div class="muted">Nhập tin nhắn ở web, hệ thống sẽ gửi sang Telegram của bạn và hiển thị câu trả lời tự động bên dưới.</div>
-  </div>
-
-  <div class="grid" style="margin-top:12px">
-    <div class="card">
-      <div class="row" style="margin-bottom:8px">
-        <div class="badge">🎛️ Chế độ trả lời</div>
-        <select id="style" style="width:auto">
-          <option value="friendly">Thân thiện</option>
-          <option value="expert">Chuyên gia</option>
-        </select>
-      </div>
-      <div id="box"></div>
-      <div class="controls">
-        <input id="msg" placeholder="Nhập tin nhắn…"/>
-        <button id="send" class="send">Gửi</button>
-      </div>
-      <div class="tip muted">• Mặc định dùng AI nếu có <code>OPENAI_API_KEY</code>. Nếu không, bot sẽ dùng trả lời ngắn theo từ khoá (fallback).</div>
+    <div class="row">
+      <div class="badge">⚡ Realtime Pull</div>
+      <button id="theme" class="badge">Đổi theme</button>
     </div>
 
     <div class="card">
-      <div class="badge">🖼️ Gallery • Tech trend</div>
-      <div class="gallery" style="margin-top:10px">
-        <img src="https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=800&auto=format&fit=crop" alt="">
-        <img src="https://images.unsplash.com/photo-1518779578993-ec3579fee39f?q=80&w=800&auto=format&fit=crop" alt="">
-        <img src="https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=800&auto=format&fit=crop" alt="">
-        <img src="https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=800&auto=format&fit=crop" alt="">
+      <h1>Web Chat ↔ <b>Telegram</b></h1>
+      <div class="muted">Nhập tin nhắn ở dưới để gửi sang Telegram. Trả lời bên Telegram sẽ tự hiện lại ở khung chat này.</div>
+
+      <div class="grid" style="margin-top:12px">
+        <div class="card" style="background:transparent;border:none;padding:0">
+          <div id="box"></div>
+          <div class="controls">
+            <input id="msg" placeholder="Nhập tin nhắn..." />
+            <button id="send">Gửi</button>
+          </div>
+          <div class="muted" style="margin-top:6px">• Mặc định dùng <b>CHAT_ID</b> trong ENV. Nếu app bạn lấy chat_id động thì chỉ cần nhắn bot một lần trên Telegram.</div>
+        </div>
+
+        <div class="card">
+          <div class="badge">🖼️ Gallery</div>
+          <div class="gallery" style="margin-top:10px">
+            <img src="https://images.unsplash.com/photo-1550439062-609e1531270e?q=80&w=800&auto=format&fit=crop" alt="">
+            <img src="https://images.unsplash.com/photo-1542751110-97427bbecf20?q=80&w=800&auto=format&fit=crop" alt="">
+            <img src="https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=800&auto=format&fit=crop" alt="">
+            <img src="https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=800&auto=format&fit=crop" alt="">
+          </div>
+          <div class="muted">Bấm ảnh để xem lớn (demo tĩnh).</div>
+        </div>
       </div>
-      <div class="tip muted">Bấm ảnh để mở lớn (giữ vào ảnh trên di động để lưu/chia sẻ).</div>
     </div>
+
+    <div class="muted" style="margin-top:16px">© 2025 · RaidenX7 · Cloudflare Pages ↔ Render ↔ Telegram</div>
   </div>
-</div>
 
-<script>
-const body = document.body;
-document.getElementById('theme').onclick = () => body.classList.toggle('light');
+  <script>
+  // ------ cấu hình backend: nếu đang ở Render thì dùng đường tương đối, còn ở Pages thì gọi sang domain Render ------
+  const BACKEND = location.hostname.endsWith("onrender.com") ? "" : "https://raidenx7-bot.onrender.com";
 
-const box = document.getElementById('box');
-const input = document.getElementById('msg');
-const sendBtn = document.getElementById('send');
-const styleSel = document.getElementById('style');
+  // theme
+  const body = document.body;
+  document.getElementById('theme').onclick = () => body.classList.toggle('light');
 
-function add(side, text){
-  const d = document.createElement('div');
-  d.className = 'msg ' + side;
-  d.textContent = text;
-  box.appendChild(d);
-  box.scrollTop = box.scrollHeight;
-}
+  // elements
+  const box = document.getElementById('box');
+  const input = document.getElementById('msg');
+  const sendBtn = document.getElementById('send');
 
-async function send(){
-  const text = input.value.trim();
-  if(!text) return;
-  add('me', text);
-  input.value = '';
-
-  // gọi API Flask ở cùng domain Render
-  try{
-    const style = styleSel.value;
-    const r = await fetch('/api/send', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ text, style })
-    });
-    const j = await r.json();
-    if(j.ok) add('bot', j.reply);
-    else add('bot', 'Lỗi: ' + (j.error || 'Không xác định'));
-  }catch(e){
-    add('bot', 'Lỗi mạng, thử lại nhé!');
+  // helper thêm bong bóng
+  function add(side, text){
+    if(!text) return;
+    const d = document.createElement('div');
+    d.className = 'msg ' + side;
+    d.textContent = text;
+    box.appendChild(d);
+    box.scrollTop = box.scrollHeight;
   }
-}
 
-sendBtn.onclick = send;
-input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
-</script>
+  // gửi từ web → Telegram
+  async function send(){
+    const text = (input.value || '').trim();
+    if(!text) return;
+    add('me', text);
+    input.value = '';
+
+    try{
+      const r = await fetch(`${BACKEND}/api/send`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ text })
+      });
+      const j = await r.json();
+      if(!j.ok){
+        add('bot', 'Lỗi gửi: ' + (j.error || 'unknown'));
+      }
+    }catch(e){
+      add('bot', 'Lỗi mạng, thử lại nhé.');
+    }
+  }
+
+  sendBtn.onclick = send;
+  input.addEventListener('keydown', e => { if(e.key === 'Enter') send(); });
+
+  // ---- Polling nhận tin từ Telegram (server lưu vào /api/messages) ----
+  let lastTs = 0;
+  async function pollMessages(){
+    try{
+      const url = lastTs ? `${BACKEND}/api/messages?since=${lastTs}` : `${BACKEND}/api/messages`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if(data.ok){
+        lastTs = data.now || lastTs;
+        (data.items || []).forEach(m => {
+          if(m.source === 'telegram') add('bot', m.text);
+        });
+      }
+    }catch(e){
+      // bỏ qua lỗi
+    }finally{
+      setTimeout(pollMessages, 2000); // 2 giây 1 lần
+    }
+  }
+  pollMessages();
+  </script>
 </body>
 </html>
