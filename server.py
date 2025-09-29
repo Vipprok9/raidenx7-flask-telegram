@@ -1,46 +1,66 @@
-from flask import Flask, request, jsonify
+import os, time, json, requests
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-import os, requests
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})  # BẮT BUỘC để web gọi được
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
-CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")   or os.getenv("TARGET_CHAT_ID")
+# Env vars
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
-MEMO = []  # lưu ngắn để web đọc /messages
+# Bộ nhớ tạm
+events = []
 
-@app.route("/")
-def home():
-    return jsonify(status="ok")
+def push_event(msg):
+    events.append({"text": msg, "ts": time.time()})
+    if len(events) > 100:
+        events.pop(0)
 
+@app.route("/health")
+def health():
+    return "OK", 200
+
+# Web gửi tin → Telegram
 @app.route("/send", methods=["POST"])
 def send():
+    data = request.json
+    text = data.get("text", "")
+    if not text:
+        return "no text", 400
     try:
-        text = (request.get_json() or {}).get("text", "").strip()
-        if not text:
-            return jsonify(success=False, error="empty_text"), 400
-
-        MEMO.append({"side": "me", "text": text})
-        MEMO[:] = MEMO[-50:]
-
-        if BOT_TOKEN and CHAT_ID:
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-            requests.post(url, json={"chat_id": CHAT_ID, "text": f"Web gửi: {text}"}, timeout=10)
-
-        return jsonify(success=True)
+        requests.post(f"{API_URL}/sendMessage", json={"chat_id": CHAT_ID, "text": text})
+        push_event(f"Me: {text}")
+        return "ok"
     except Exception as e:
-        return jsonify(success=False, error=str(e)), 500
+        return str(e), 500
 
-@app.route("/messages", methods=["GET"])
-def messages():
-    return jsonify(items=MEMO)
+# Polling lấy sự kiện
+@app.route("/events")
+def get_events():
+    return jsonify(events)
 
-# (tùy chọn) route debug gửi nhanh trên trình duyệt:
-@app.route("/debug-send")
-def debug_send():
-    text = request.args.get("text", "ping")
-    if BOT_TOKEN and CHAT_ID:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": CHAT_ID, "text": f"Debug: {text}"}, timeout=10)
-    return jsonify(ok=True, sent=text)
+# SSE realtime
+@app.route("/stream")
+def stream():
+    def event_stream():
+        last = 0
+        while True:
+            if events and events[-1]["ts"] > last:
+                last = events[-1]["ts"]
+                yield f"data: {json.dumps(events[-1], ensure_ascii=False)}\n\n"
+            time.sleep(1)
+    return Response(event_stream(), mimetype="text/event-stream")
+
+# Telegram webhook → web
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.json
+    if "message" in data and "text" in data["message"]:
+        text = data["message"]["text"]
+        push_event(f"Bot: {text}")
+    return "ok"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
