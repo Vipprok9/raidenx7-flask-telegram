@@ -3,55 +3,44 @@ from flask_cors import CORS
 import os, requests
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})  # BẮT BUỘC để web gọi được
 
-# Đọc biến môi trường đúng với Render
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
+CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")   or os.getenv("TARGET_CHAT_ID")
 
-TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
-def send_message(chat_id, text):
-    url = f"{TELEGRAM_API}/sendMessage"
-    r = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=15)
-    return r.json()
+MEMO = []  # lưu ngắn để web đọc /messages
 
 @app.route("/")
 def home():
     return jsonify(status="ok")
 
-@app.route("/set-webhook")
-def set_webhook():
-    webhook_url = f"{request.host_url}webhook"
-    r = requests.get(f"{TELEGRAM_API}/setWebhook", params={"url": webhook_url})
-    return r.json()
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.json or {}
-    msg = data.get("message") or {}
-    chat_id = (msg.get("chat") or {}).get("id")
-    text = msg.get("text", "")
-    if text:
-        # Forward về chat mặc định
-        if CHAT_ID:
-            send_message(CHAT_ID, f"Forward từ {chat_id}: {text}")
-        # Trả lời trực tiếp cho user
-        if chat_id:
-            send_message(chat_id, f"Mình đã nhận: {text}")
-    return "ok"
-
 @app.route("/send", methods=["POST"])
-def send_from_web():
-    data = request.json or {}
-    text = str(data.get("text", "")).strip()
-    if not text:
-        return jsonify(success=False, error="Empty text"), 400
-    if not (BOT_TOKEN and CHAT_ID):
-        return jsonify(success=False, error="Missing env vars"), 400
+def send():
+    try:
+        text = (request.get_json() or {}).get("text", "").strip()
+        if not text:
+            return jsonify(success=False, error="empty_text"), 400
 
-    resp = send_message(CHAT_ID, f"Web gửi: {text}")
-    return jsonify(success=True, telegram=resp)
+        MEMO.append({"side": "me", "text": text})
+        MEMO[:] = MEMO[-50:]
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+        if BOT_TOKEN and CHAT_ID:
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            requests.post(url, json={"chat_id": CHAT_ID, "text": f"Web gửi: {text}"}, timeout=10)
+
+        return jsonify(success=True)
+    except Exception as e:
+        return jsonify(success=False, error=str(e)), 500
+
+@app.route("/messages", methods=["GET"])
+def messages():
+    return jsonify(items=MEMO)
+
+# (tùy chọn) route debug gửi nhanh trên trình duyệt:
+@app.route("/debug-send")
+def debug_send():
+    text = request.args.get("text", "ping")
+    if BOT_TOKEN and CHAT_ID:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": CHAT_ID, "text": f"Debug: {text}"}, timeout=10)
+    return jsonify(ok=True, sent=text)
