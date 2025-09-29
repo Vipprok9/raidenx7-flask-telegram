@@ -1,13 +1,13 @@
-# raidenx7-bot (Render)
+# RaidenX7 Bot (Render)
 
-API bridge Web → Telegram.
+API bridge Web ↔ Telegram 2 chiều.
 
-## ENV (Render → Environment)
-- `BOT_TOKEN` : Bot token từ @BotFather
-- `CHAT_ID`   : chat id nhận tin (cá nhân hoặc group)
+## Cấu hình ENV (Render → Environment)
+- `BOT_TOKEN` : bot token từ @BotFather  
+- `CHAT_ID` : chat id nhận tin (cá nhân hoặc group)  
+- `RENDER_EXTERNAL_URL` : https://your-app.onrender.com  
 
 ## Deploy (Render)
-- **Build Command**: `pip install -r requirements.txt`
-- **Start Command**: `gunicorn server:app`
-
-Mở `/` để test UI; gọi API: `POST /api/send` `{ "text": "Xin chào" }`.
+- Build Command:
+  ```bash
+  pip install -r requirements.txt
