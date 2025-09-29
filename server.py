@@ -1,29 +1,25 @@
-import os, time, json, queue
-import requests
-from flask import Flask, request, jsonify, Response, make_response
+import os, time, queue, threading, requests, json
+from flask import Flask, request, jsonify, Response
 
-# ==== Env ====
+# ---- Env ----
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 if not BOT_TOKEN or not CHAT_ID:
     raise RuntimeError("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
+
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 app = Flask(__name__)
-inbox: "queue.Queue[dict]" = queue.Queue(maxsize=200)
-history: list[dict] = []   # lưu để /events & SSE trả snapshot
 
-# ---- headers: no-cache + CORS ----
-@app.after_request
-def add_headers(resp):
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    return resp
+inbox = queue.Queue(maxsize=1000)
+history = []
 
+# ---- Home ----
+@app.get("/")
+def home():
+    return "<h2>⚡ RaidenX7 Bot Backend ⚡</h2><p>Server OK - check <a href='/health'>/health</a></p>"
+
+# ---- Health ----
 @app.get("/health")
 def health():
     return "OK", 200
@@ -39,15 +35,17 @@ def send():
         r = requests.post(f"{API}/sendMessage",
                           json={"chat_id": CHAT_ID, "text": text},
                           timeout=10)
-        ok = r.ok and (r.json().get("ok") if r.headers.get("content-type","").startswith("application/json") else True)
-        msg = {"id": int(time.time()*1000), "text": text, "from": "web"}
+        body = r.json()
+        ok = bool(r.ok and body.get("ok"))
+        msg = {"id": int(time.time()*1000), "text": text, "from": "me"}
         history.append(msg)
         if len(history) > 500: history[:] = history[-500:]
-        return {"ok": bool(ok), "tg": r.json() if r.headers.get("content-type","").startswith("application/json") else {}}, (200 if ok else 502)
+        print("SEND:", body)
+        return {"ok": ok, "tg": body}, (200 if ok else 502)
     except Exception as e:
         return {"ok": False, "error": str(e)}, 500
 
-# ---- Fallback: polling qua HTTP của web (trả ngay các item chờ) ----
+# ---- Events (fallback polling) ----
 @app.get("/events")
 def events():
     items = []
@@ -59,14 +57,13 @@ def events():
     except queue.Empty:
         pass
     if len(history) > 500: history[:] = history[-500:]
-    return make_response(jsonify(items), 200)
+    return jsonify(items), 200
 
 # ---- SSE realtime ----
 def sse_stream():
-    # gửi snapshot 20 tin gần nhất
-    for it in history[-20:]:
+    snapshot = history[-20:]
+    for it in snapshot:
         yield f"data: {json.dumps(it, ensure_ascii=False)}\n\n"
-    # stream các tin mới
     while True:
         try:
             item = inbox.get(timeout=30)
@@ -74,31 +71,35 @@ def sse_stream():
             if len(history) > 500: history[:] = history[-500:]
             yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
         except queue.Empty:
-            # keep-alive
-            yield ":\\n\\n"
+            yield ":keep-alive\n\n"
 
 @app.get("/stream")
 def stream():
     return Response(sse_stream(), mimetype="text/event-stream")
 
-# ---- Telegram -> Web (WEBHOOK) ----
+# ---- Telegram -> Web ----
 @app.post("/webhook")
 def telegram_webhook():
     update = request.get_json(silent=True) or {}
-    msg = (update.get("message") or update.get("edited_message")) or {}
-    text = (msg.get("text") or "").strip()
+    msg = (update.get("message") or
+           update.get("edited_message") or
+           update.get("channel_post") or
+           update.get("edited_channel_post") or {})
+    text = (msg.get("text") or msg.get("caption") or "").strip()
     mid = msg.get("message_id") or int(time.time()*1000)
-    if text:
-        item = {"id": mid, "text": text, "from": "tg"}
-        try:
-            inbox.put_nowait(item)
-        except queue.Full:
-            _ = inbox.get_nowait()
-            inbox.put_nowait(item)
-        history.append(item)
-        if len(history) > 500: history[:] = history[-500:]
-    # MUST: trả 200 ngay
+    chat_id = (msg.get("chat") or {}).get("id")
+
+    item = {"id": mid, "text": text or "[non-text]", "from": "tg", "chat_id": chat_id}
+    try:
+        inbox.put_nowait(item)
+    except queue.Full:
+        _ = inbox.get_nowait()
+        inbox.put_nowait(item)
+    history.append(item)
+    if len(history) > 500: history[:] = history[-500:]
+
+    print("WEBHOOK update:", update)  # log để debug trên Render
     return "OK", 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
