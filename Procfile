@@ -1,1 +1,1 @@
-web: gunicorn server:app --workers 1 --threads 4 --timeout 120 --keep-alive 25
+web: gunicorn server:app -k gevent -w 1 --timeout 0
