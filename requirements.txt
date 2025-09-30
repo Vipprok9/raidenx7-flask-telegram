@@ -1,5 +1,5 @@
-python-telegram-bot==13.15flask
+Flask
 flask-cors
 requests
 gunicorn
-gevent
+python-telegram-bot==13.15
