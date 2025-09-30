@@ -1,138 +1,104 @@
-import os, time, queue, threading, requests
-from flask import Flask, request, jsonify, Response
+import os
+import json
+import time
+import queue
+import requests
+from flask import Flask, request, Response, jsonify
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
-# ==== Env vars ====
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-TG_API    = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else None
+# ===== ENV =====
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# ==== Event queue ====
-event_q = queue.Queue(maxsize=2000)
-event_id = 0
-lock = threading.Lock()
+# ===== EVENT QUEUE (cho SSE/polling) =====
+events = queue.Queue()
 
 def push_event(kind, text, sender="system"):
-    """Đẩy tin nhắn vào hàng đợi cho web"""
-    global event_id
-    with lock:
-        event_id += 1
-        eid = event_id
-    data = {"id": eid, "kind": kind, "text": text, "sender": sender, "ts": time.time()}
+    evt = {"id": int(time.time()*1000), "kind": kind, "text": text, "from": sender}
     try:
-        event_q.put_nowait(data)
+        events.put_nowait(evt)
     except queue.Full:
-        _ = event_q.get_nowait()
-        event_q.put_nowait(data)
-    return data
+        pass
+    return evt
 
-# ==== Routes ====
-@app.get("/")
-def home():
-    return "<h2>⚡ RaidenX7 Bot Backend</h2>"
+# ===== TELEGRAM SEND =====
+def send_to_telegram(text, chat_id=None):
+    cid = chat_id or CHAT_ID
+    if not BOT_TOKEN or not cid:
+        return {"ok": False, "error": "Missing token/chat_id"}
+    url = f"{TG_API}/sendMessage"
+    r = requests.post(url, json={"chat_id": cid, "text": text}, timeout=10)
+    return r.json()
 
+# ===== API: Web → Telegram =====
 @app.post("/send")
-def send_to_tg():
-    """
-    Web -> Telegram
-    """
-    if not TG_API or not CHAT_ID:
-        return jsonify({"ok": False, "error": "Missing TELEGRAM_* env"}), 500
-
-    text = (request.json or {}).get("text", "").strip()
+def send_msg():
+    data = request.get_json(force=True)
+    text = data.get("text")
     if not text:
-        return jsonify({"ok": False, "error": "empty"}), 400
-
-    # Push event cho web hiển thị ngay
+        return jsonify({"ok": False, "error": "No text"}), 400
+    send_to_telegram(text)
     push_event("message", text, sender="web")
-
-    # Gửi Telegram async
-    def _bg_send():
-        try:
-            requests.post(f"{TG_API}/sendMessage",
-                          json={"chat_id": CHAT_ID, "text": text}, timeout=10)
-        except Exception:
-            pass
-    threading.Thread(target=_bg_send, daemon=True).start()
-
     return jsonify({"ok": True})
 
+# ===== API: SSE stream =====
+@app.get("/stream")
+def stream():
+    def event_stream():
+        while True:
+            evt = events.get()
+            yield f"data: {json.dumps(evt)}\n\n"
+    return Response(event_stream(), mimetype="text/event-stream")
+
+# ===== TELEGRAM WEBHOOK =====
 @app.post("/webhook")
 def telegram_webhook():
-    """
-    Telegram -> Webhook -> đẩy cho web
-    """
     update = request.get_json(silent=True) or {}
     msg = (update.get("message") or update.get("edited_message") or {})
     text = (msg.get("text") or "").strip()
+    chat = msg.get("chat") or {}
+    chat_id = chat.get("id")
 
-    if text:
-        push_event("message", text, sender="telegram")
+    if not chat_id or not text:
+        return jsonify({"ok": True})
+
+    # Đẩy lên web UI
+    push_event("message", text, sender="telegram")
+
+    # ===== AUTO-REPLY LOGIC =====
+    reply = None
+    lower = text.lower()
+    if lower in {"/start", "hi", "hello", "chào"}:
+        reply = "Xin chào 👋, mình là bot RaidenX7. Bạn có thể hỏi mình vài câu cơ bản."
+    elif "ping" in lower or "test" in lower:
+        reply = "pong ✅"
+    elif "mấy giờ" in lower or "giờ" in lower:
+        reply = time.strftime("Bây giờ là %H:%M:%S", time.localtime())
+    elif "ngày" in lower or "hôm nay" in lower:
+        reply = time.strftime("Hôm nay là %d/%m/%Y", time.localtime())
+    elif "thời tiết" in lower:
+        reply = "Mình chưa xem được API thời tiết, nhưng nhớ mang áo mưa nếu trời âm u ☔"
+    else:
+        reply = f"Bạn vừa nhắn: {text}"
+
+    if reply:
+        try:
+            requests.post(f"{TG_API}/sendMessage",
+                          json={"chat_id": chat_id, "text": reply},
+                          timeout=10)
+        except Exception as e:
+            print("Send error:", e)
 
     return jsonify({"ok": True})
 
-@app.get("/events")
-def events_long_poll():
-    """
-    Long-poll: client gọi /events?since=<lastId>
-    Server chờ tối đa 25s nếu chưa có tin mới
-    """
-    since = int(request.args.get("since", "0") or 0)
-    deadline = time.time() + 25
-    cached = []
-
-    # Gom nhanh tin mới trong queue
-    try:
-        while True:
-            item = event_q.get_nowait()
-            if item["id"] > since:
-                cached.append(item)
-    except queue.Empty:
-        pass
-    if cached:
-        return jsonify({"ok": True, "events": cached})
-
-    # Nếu chưa có, chờ blocking
-    while time.time() < deadline:
-        try:
-            item = event_q.get(timeout=1.0)
-            if item["id"] > since:
-                cached.append(item)
-                # drain các item kế tiếp
-                try:
-                    while True:
-                        nxt = event_q.get_nowait()
-                        if nxt["id"] > since:
-                            cached.append(nxt)
-                except queue.Empty:
-                    pass
-                return jsonify({"ok": True, "events": cached})
-        except queue.Empty:
-            continue
-
-    return jsonify({"ok": True, "events": []})
-
-@app.get("/stream")
-def stream():
-    """
-    SSE stream cho frontend (fallback nếu dùng SSE)
-    """
-    def event_stream():
-        last_sent = 0
-        while True:
-            try:
-                item = event_q.get(timeout=15)
-                yield f"data: {item}\n\n"
-                last_sent = item["id"]
-            except queue.Empty:
-                yield ": keepalive\n\n"
-    return Response(event_stream(), mimetype="text/event-stream")
-
+# ===== HEALTH =====
 @app.get("/health")
 def health():
-    return jsonify({"ok": True, "time": time.time()})
+    return "ok", 200
 
-# ==== Run local ====
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")), debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
