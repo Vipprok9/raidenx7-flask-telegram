@@ -1,1 +1,1 @@
-web: gunicorn -k gevent server:app
+web: gunicorn server:app
